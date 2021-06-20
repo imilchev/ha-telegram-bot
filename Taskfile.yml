@@ -10,10 +10,10 @@ tasks:
     cmds:
       - go build -o output/ .
     sources:
-      - ./**/.*go
-      - go.mod
+      - '**/*.go'
     generates:
       - output/hass-telegram-bot
+    method: checksum
     silent: false
 
   lint:

@@ -4,6 +4,7 @@ go 1.16
 
 require (
 	github.com/google/go-cmp v0.5.6 // indirect
+	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/sergi/go-diff v1.2.0 // indirect
 	github.com/spf13/cobra v1.1.3 // indirect
 	go.uber.org/zap v1.17.0 // indirect

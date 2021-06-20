@@ -1,0 +1,6 @@
+{
+    "homeAssistant": {
+        "url": "ws://ha.home.io/api/websocket",
+        "accessToken": "secret"
+    }
+}
