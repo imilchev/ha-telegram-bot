@@ -1,0 +1,24 @@
+name: Build
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/imilchev/go-devcontainer:v1.0.0
+      credentials:
+        username: ${{ github.repository_owner }}
+        password: ${{ secrets.PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Lint
+        run: task lint
+
+      - name: Build
+        run: task build

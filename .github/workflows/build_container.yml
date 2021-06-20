@@ -1,0 +1,29 @@
+name: Build container
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Container image version  
+        required: true
+        default: latest
+
+jobs:
+  build_container:
+    name: Build dev container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Login to GitHub Packages Docker Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.PACKAGES_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v2
+        with:
+          context: .devcontainer
+          push: true
+          tags: ghcr.io/imilchev/go-devcontainer:${{ github.event.inputs.version }}
