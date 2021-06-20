@@ -28,5 +28,6 @@ type State struct {
 }
 
 type Attributes struct {
-	FriendlyName string `json:"friendly_name"`
+	FriendlyName      string `json:"friendly_name"`
+	UnitOfMeasurement string `json:"unit_of_measurement"`
 }

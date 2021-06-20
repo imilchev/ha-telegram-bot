@@ -14,88 +14,105 @@ import (
 type WsClient struct {
 	url         *url.URL
 	accessToken string
+	eventChan   chan model.EventMessage
+	ws          *websocket.Conn
 }
 
-func NewWsClient(config config.HomeAssistantConfig) (*WsClient, error) {
+func NewWsClient(config config.HomeAssistantConfig, eventChan chan model.EventMessage) (*WsClient, error) {
 	url, err := url.Parse(config.Url)
 	if err != nil {
 		zap.S().Errorf("Failed to parse HA websocket URL. %+v", err)
 		return nil, err
 	}
-	return &WsClient{url: url, accessToken: config.AccessToken}, nil
+
+	c, _, err := websocket.DefaultDialer.Dial(url.String(), nil)
+	if err != nil {
+		zap.S().Fatal("Failed to open websocket connection to %s. %+v", url.String(), err)
+		return nil, err
+	}
+
+	return &WsClient{
+		url:         url,
+		accessToken: config.AccessToken,
+		eventChan:   eventChan,
+		ws:          c,
+	}, nil
 }
 
 func (ws *WsClient) Start() error {
-	c, _, err := websocket.DefaultDialer.Dial(ws.url.String(), nil)
-	if err != nil {
-		zap.S().Fatal("Failed to open websocket connection to %s. %+v", ws.url.String(), err)
-		return err
-	}
-	defer c.Close()
-
 	errChan := make(chan error)
-	ws.subscribeToEvents(c, errChan)
-	return nil
+	return ws.subscribeToEvents(errChan)
 }
 
-func (ws *WsClient) subscribeToEvents(c *websocket.Conn, errChan chan error) {
+func (ws *WsClient) Stop() error {
+	return ws.ws.Close()
+}
+
+func (ws *WsClient) subscribeToEvents(errChan chan error) error {
 	initMsg := model.NewAuthRequiredMessage()
-	if err := readMessageOfType(c, initMsg); err != nil {
+	if err := ws.readMessageOfType(initMsg); err != nil {
 		zap.S().Error(err)
 		errChan <- err
-		return
+		return err
 	}
 
 	// Authenticate
 	zap.S().Infof("Connected to HA version %s. Authenticating...", initMsg.HomeAssistantVersion)
-	if err := c.WriteJSON(model.NewAuthMessage(ws.accessToken)); err != nil {
+	if err := ws.ws.WriteJSON(model.NewAuthMessage(ws.accessToken)); err != nil {
 		zap.S().Errorf("Failed to send authentication. %+v", err)
 		errChan <- err
-		return
+		return err
 	}
 
 	// Verify authentication
 	authOkMsg := &model.Message{Type: model.AuthOkMsgType}
-	if err := readMessageOfType(c, authOkMsg); err != nil {
+	if err := ws.readMessageOfType(authOkMsg); err != nil {
 		zap.S().Error(err)
 		errChan <- err
-		return
+		return err
 	}
 	zap.S().Infof("Successfully authenticated to HA.")
 
 	// Subscribe to state_changed events
-	if err := c.WriteJSON(model.NewSubscribeEventsMessage(1, model.StateChangedEventType)); err != nil {
-		zap.S().Errorf("Failed to subscribe to events. %+v", err)
+	if err := ws.ws.WriteJSON(model.NewSubscribeEventsMessage(1, model.StateChangedEventType)); err != nil {
+		zap.S().Errorf("Failed to subscribe to HA events. %+v", err)
 		errChan <- err
-		return
+		return err
 	}
 
 	// Verify subscription
 	resMsg := model.NewResultMessage()
-	if err := readMessageOfType(c, resMsg); err != nil {
+	if err := ws.readMessageOfType(resMsg); err != nil {
 		zap.S().Error(err)
 		errChan <- err
-		return
+		return err
 	}
 	if !resMsg.Success {
 		err := fmt.Errorf("Subscription to events failed. %+v", resMsg)
 		errChan <- err
-		return
+		return err
 	}
+	zap.S().Info("Successfully subscribed to HA events.")
 
 	for {
 		eventMsg := model.NewEventMessage()
-		if err := readMessageOfType(c, eventMsg); err != nil {
-			zap.S().Error(err)
-			errChan <- err
-			return
+		if err := ws.readMessageOfType(eventMsg); err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				zap.S().Error(err)
+				errChan <- err
+				return err
+			}
+			zap.S().Info("HA client shut down.")
+			close(ws.eventChan)
+			return nil
 		}
-		zap.S().Debugf("recv: %+v", eventMsg) // TODO: make sure this is propagated to the necessary handler
+		ws.eventChan <- *eventMsg
+		zap.S().Debug("Write to chan")
 	}
 }
 
-func readMessageOfType(c *websocket.Conn, msg model.HAMessage) error {
-	_, msgRaw, err := c.ReadMessage()
+func (ws *WsClient) readMessageOfType(msg model.HAMessage) error {
+	_, msgRaw, err := ws.ws.ReadMessage()
 	if err != nil {
 		return fmt.Errorf("Error receiving message from HA. %+v", err)
 	}
