@@ -16,6 +16,16 @@ tasks:
     method: checksum
     silent: false
 
+  build_pi:
+    cmds:
+      - GOOS=linux GOARCH=arm GOARM=7 go build -o output/pi/ .
+    sources:
+      - '**/*.go'
+    generates:
+      - output/pi/hass-telegram-bot
+    method: checksum
+    silent: false
+
   lint:
     cmds:
       - golangci-lint run
