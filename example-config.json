@@ -1,6 +1,24 @@
 {
     "homeAssistant": {
         "url": "ws://ha.home.io/api/websocket",
-        "accessToken": "secret"
+        "accessToken": "",
+        "temperatureEntityIds": [
+            "sensor.ble_temperature_bedroom1",
+            "sensor.ble_temperature_livingroom1",
+            "sensor.ble_temperature_livingroom2",
+            "sensor.ble_temperature_hallway1"
+        ],
+        "humidityEntityIds": [
+            "sensor.ble_humidity_bedroom1",
+            "sensor.ble_humidity_livingroom1",
+            "sensor.ble_humidity_livingroom2",
+            "sensor.ble_humidity_hallway1"
+        ]
+    },
+    "telegram": {
+        "token": "",
+        "allowedUsers": [
+            "ivanmilchev"
+        ]
     }
 }

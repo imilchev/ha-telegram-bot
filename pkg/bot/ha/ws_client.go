@@ -12,13 +12,14 @@ import (
 )
 
 type WsClient struct {
-	url         *url.URL
-	accessToken string
-	eventChan   chan model.EventMessage
-	ws          *websocket.Conn
+	TempChan  chan model.EventMessage
+	HumidChan chan model.EventMessage
+	url       *url.URL
+	config    config.HomeAssistantConfig
+	ws        *websocket.Conn
 }
 
-func NewWsClient(config config.HomeAssistantConfig, eventChan chan model.EventMessage) (*WsClient, error) {
+func NewWsClient(config config.HomeAssistantConfig) (*WsClient, error) {
 	url, err := url.Parse(config.Url)
 	if err != nil {
 		zap.S().Errorf("Failed to parse HA websocket URL. %+v", err)
@@ -32,10 +33,11 @@ func NewWsClient(config config.HomeAssistantConfig, eventChan chan model.EventMe
 	}
 
 	return &WsClient{
-		url:         url,
-		accessToken: config.AccessToken,
-		eventChan:   eventChan,
-		ws:          c,
+		TempChan:  make(chan model.EventMessage, 100),
+		HumidChan: make(chan model.EventMessage, 100),
+		url:       url,
+		config:    config,
+		ws:        c,
 	}, nil
 }
 
@@ -58,7 +60,7 @@ func (ws *WsClient) subscribeToEvents(errChan chan error) error {
 
 	// Authenticate
 	zap.S().Infof("Connected to HA version %s. Authenticating...", initMsg.HomeAssistantVersion)
-	if err := ws.ws.WriteJSON(model.NewAuthMessage(ws.accessToken)); err != nil {
+	if err := ws.ws.WriteJSON(model.NewAuthMessage(ws.config.AccessToken)); err != nil {
 		zap.S().Errorf("Failed to send authentication. %+v", err)
 		errChan <- err
 		return err
@@ -103,11 +105,11 @@ func (ws *WsClient) subscribeToEvents(errChan chan error) error {
 				return err
 			}
 			zap.S().Info("HA client shut down.")
-			close(ws.eventChan)
+			close(ws.TempChan)
+			close(ws.HumidChan)
 			return nil
 		}
-		ws.eventChan <- *eventMsg
-		zap.S().Debug("Write to chan")
+		ws.filterMessage(*eventMsg)
 	}
 }
 
@@ -123,78 +125,21 @@ func (ws *WsClient) readMessageOfType(msg model.HAMessage) error {
 	return json.Unmarshal(msgRaw, msg)
 }
 
-// func Test() error {
-// 	interrupt := make(chan os.Signal, 1)
-// 	signal.Notify(interrupt, os.Interrupt)
+func (ws *WsClient) filterMessage(msg model.EventMessage) {
+	for _, t := range ws.config.TemperatureEntityIds {
+		if msg.Event.Data.EntityId == t {
+			ws.TempChan <- msg
+			zap.S().Debugf("Message written to temperature chan %+v.", msg)
+			return
+		}
+	}
 
-// 	uStr := "ws://ha.home.io/api/websocket"
-// 	u, err := url.Parse(uStr)
-// 	if err != nil {
-// 		zap.S().Errorf("Failed to parse HA websocket URL. %+v", err)
-// 	}
-// 	zap.S().Infof("Connecting to %s", u.String())
-
-// 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-// 	if err != nil {
-// 		log.Fatal("dial:", err)
-// 	}
-// 	defer c.Close()
-
-// 	done := make(chan struct{})
-
-// 	go func() {
-// 		defer close(done)
-// 		_, msg, err := c.ReadMessage()
-// 		if err != nil {
-// 			zap.S().Errorf("Error receiving initial message from HA. %+v", err)
-// 		}
-
-// 		if err := model.ExpectMessageType(msg, model.AuthRequiredMsgType); err != nil {
-// 			zap.S().Error(err)
-// 			return
-// 		}
-
-// 		initMsg := &model.InitMessage{}
-// 		if err := json.Unmarshal(msg, initMsg); err != nil {
-// 			zap.S().Errorf("Failed to deserialize initial message %s. %+v", string(msg), err)
-// 			return
-// 		}
-
-// 		zap.S().Infof("Connected to HA version %s. Authenticating...", initMsg.HomeAssistantVersion)
-// 		if err := c.WriteJSON(model.NewAuthMessage(accessToken)); err != nil {
-// 			zap.S().Errorf("Failed to send authentication. %+v", err)
-// 			return
-// 		}
-
-// 		for {
-// 			_, message, err := c.ReadMessage()
-// 			if err != nil {
-// 				zap.S().Debugf("read: %+v", err)
-// 				return
-// 			}
-// 			zap.S().Debugf("recv: %s", message)
-// 		}
-// 	}()
-
-// 	for {
-// 		select {
-// 		case <-done:
-// 			return nil
-// 		case <-interrupt:
-// 			log.Println("interrupt")
-
-// 			// Cleanly close the connection by sending a close message and then
-// 			// waiting (with timeout) for the server to close the connection.
-// 			err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-// 			if err != nil {
-// 				log.Println("write close:", err)
-// 				return nil
-// 			}
-// 			select {
-// 			case <-done:
-// 			case <-time.After(time.Second):
-// 			}
-// 			return nil
-// 		}
-// 	}
-// }
+	for _, h := range ws.config.HumidityEntityIds {
+		if msg.Event.Data.EntityId == h {
+			ws.HumidChan <- msg
+			zap.S().Debugf("Message written to humidity chan %+v.", msg)
+			return
+		}
+	}
+	zap.S().Debugf("Message for entity %q has been ignored.", msg.Event.Data.EntityId)
+}
